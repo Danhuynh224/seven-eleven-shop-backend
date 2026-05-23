@@ -1,33 +1,26 @@
-# 7-Eleven Shop Backend API
+# 7-Eleven Vietnam — Shop Backend
 
-REST API backend for 7-Eleven Vietnam shop management — handles product catalog, order placement and admin operations.
-Built as a technical test for the Fresher Java Engineer position at 7-Eleven Vietnam.
-
-**Frontend repo:** _[link will be added after frontend is complete]_
+REST API backend for the 7-Eleven Vietnam Fresher Java Engineer technical test.
+Covers product management, customer ordering, and real-time event streaming.
 
 ---
 
 ## Tech Stack
 
-![Java](https://img.shields.io/badge/Java-17-orange?logo=openjdk)
-![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.2.5-green?logo=springboot)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?logo=postgresql)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
-![Maven](https://img.shields.io/badge/Maven-3.9-C71A36?logo=apachemaven)
-
 | Layer | Technology |
-|---|---|
+|-------|-----------|
 | Language | Java 17 |
 | Framework | Spring Boot 3.2.5 |
-| Security | Spring Security 6 + JWT (jjwt 0.12.5) |
-| Persistence | Spring Data JPA + Hibernate + Flyway |
-| Database | PostgreSQL 16 |
-| Mapping | MapStruct 1.5.5 |
-| Documentation | springdoc-openapi (Swagger UI) |
-| Testing | JUnit 5 + Mockito + Testcontainers |
-| Build | Maven 3.9 |
-| Container | Docker + Docker Compose |
+| Security | Spring Security 6 + JWT (jjwt 0.12) |
+| Database | PostgreSQL 16 + Flyway migrations |
+| Cache | Redis 7 (`@Cacheable` / `@CacheEvict`) |
+| Messaging | Apache Kafka 3.7 (KRaft — no Zookeeper) |
+| ORM | Spring Data JPA + Hibernate |
+| Docs | SpringDoc OpenAPI 2.5 / Swagger UI |
+| Mapping | MapStruct 1.5.5 + Lombok |
+| Build | Maven 3.9, multi-stage Docker |
 | CI | GitHub Actions |
+| Testing | JUnit 5 + Mockito (10 unit tests) |
 
 ---
 
@@ -35,266 +28,224 @@ Built as a technical test for the Fresher Java Engineer position at 7-Eleven Vie
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  React Frontend (port 5173)                             │
-└─────────────────────┬───────────────────────────────────┘
-                      │ HTTP / REST + JWT
-┌─────────────────────▼───────────────────────────────────┐
-│  Spring Boot Application (port 8080)                    │
-│                                                         │
-│  ┌────────────┐   ┌────────────┐   ┌────────────────┐  │
-│  │ Controller │──▶│  Service   │──▶│  Repository    │  │
-│  │ (REST API) │   │ (Business) │   │ (Spring Data)  │  │
-│  └────────────┘   └────────────┘   └───────┬────────┘  │
-│                                            │            │
-│  ┌─────────────────────────────────────────▼──────────┐ │
-│  │  Spring Security (JWT filter + Role-based access)  │ │
-│  └────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                      │ JDBC
-┌─────────────────────▼───────────────────────────────────┐
-│  PostgreSQL 16 (Flyway-managed schema)                  │
-└─────────────────────────────────────────────────────────┘
-```
-
-```mermaid
-graph TD
-    FE[React Frontend] -->|REST + JWT| API[Spring Boot API]
-    API --> Auth[AuthController]
-    API --> Products[ProductController]
-    API --> Orders[OrderController]
-    API --> Admin[Admin Controllers]
-    Auth --> AuthSvc[AuthService]
-    Products --> ProdSvc[ProductService]
-    Orders --> OrdSvc[OrderService]
-    Admin --> ProdSvc
-    Admin --> OrdSvc
-    AuthSvc --> UserRepo[(UserRepository)]
-    ProdSvc --> ProdRepo[(ProductRepository)]
-    OrdSvc --> OrdRepo[(OrderRepository)]
-    UserRepo --> DB[(PostgreSQL 16)]
-    ProdRepo --> DB
-    OrdRepo --> DB
+│                     Client / Swagger UI                  │
+└───────────────────────┬─────────────────────────────────┘
+                        │ HTTP
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│            Spring Security — JWT Filter                  │
+└───────────────────────┬─────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│                  REST Controllers                         │
+│  /api/auth  /api/products  /api/orders                   │
+│  /api/admin/products  /api/admin/orders  /api/categories │
+└───────────────────────┬─────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│              Service Layer (@Transactional)               │
+│         @Cacheable / @CacheEvict via Redis               │
+└──────────┬──────────────────────────┬────────────────────┘
+           │                          │
+           ▼                          ▼
+┌──────────────────┐       ┌─────────────────────┐
+│  PostgreSQL 16   │       │     Redis 7          │
+│  (Flyway DDL)    │       │  products: 10 min    │
+│  Pessimistic lock│       │  categories: 30 min  │
+│  on order create │       └─────────────────────┘
+└──────────────────┘
+           │
+           │ after order saved
+           ▼
+┌──────────────────────────────────────┐
+│   Kafka — topic: order.created        │
+│   KRaft mode, 3 partitions            │
+│   Fire-and-forget (order TX safe)     │
+└──────────────────────────────────────┘
 ```
 
 ---
 
-## ERD
-
-```mermaid
-erDiagram
-    users {
-        bigserial id PK
-        varchar username UK
-        varchar password_hash
-        varchar role
-        varchar full_name
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    categories {
-        bigserial id PK
-        varchar name UK
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    products {
-        bigserial id PK
-        varchar name
-        text description
-        numeric price
-        int stock
-        varchar image_url
-        bigint category_id FK
-        timestamp deleted_at
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    orders {
-        bigserial id PK
-        bigint user_id FK
-        numeric total_amount
-        varchar status
-        text note
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    order_items {
-        bigserial id PK
-        bigint order_id FK
-        bigint product_id FK
-        int quantity
-        numeric unit_price
-    }
-
-    users ||--o{ orders : "places"
-    categories ||--o{ products : "contains"
-    orders ||--|{ order_items : "has"
-    products ||--o{ order_items : "referenced by"
-```
-
----
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
-- Docker Desktop (for Option 1)
-- Java 17 + Maven 3.9 + PostgreSQL 16 (for Option 2)
 
-### Option 1 — Docker Compose (recommended)
+- Docker Desktop
+
+### Run with Docker Compose
 
 ```bash
-# 1. Clone the repo
+# 1. Clone the repository
 git clone <repo-url>
 cd seven-eleven-shop-backend
 
-# 2. Copy and configure environment
+# 2. Copy env file (defaults work out of the box)
 cp .env.example .env
-# Edit .env if needed (defaults work for local dev)
 
-# 3. Start everything in one command
+# 3. Start all services (PostgreSQL, Redis, Kafka, Backend)
 docker compose up --build
-
-# API is ready at http://localhost:8080
-# Swagger UI at http://localhost:8080/swagger-ui.html
 ```
 
-### Option 2 — Local Development
+Services started:
+
+| Service | URL |
+|---------|-----|
+| Backend API | http://localhost:8080 |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| Health check | http://localhost:8080/actuator/health |
+| PostgreSQL | localhost:5432 |
+| Redis | localhost:6379 |
+| Kafka | localhost:9092 |
+
+### Default Accounts
+
+| Username | Password | Role |
+|----------|----------|------|
+| `admin` | `admin123` | ADMIN |
+| `customer1` | `customer123` | CUSTOMER |
+| `customer2` | `customer123` | CUSTOMER |
+
+> Passwords are BCrypt-hashed at runtime via `DataInitializerConfig` — no plaintext in SQL or source code.
+
+---
+
+## API Endpoints
+
+### Authentication
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Login — returns JWT token |
+| POST | `/api/auth/register` | Register a new customer |
+
+### Products (Public)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/products` | List products (paginated, search, filter by category, sort) |
+| GET | `/api/products/{id}` | Get product detail |
+
+### Admin — Products
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/admin/products` | Create product |
+| PUT | `/api/admin/products/{id}` | Update product |
+| DELETE | `/api/admin/products/{id}` | Soft-delete product |
+
+### Categories
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/categories` | List all categories |
+
+### Orders (Customer)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/orders` | Place a new order |
+| GET | `/api/orders/my` | View my orders (paginated) |
+
+### Admin — Orders
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/admin/orders` | List all orders (filter by status, date range) |
+| GET | `/api/admin/orders/{id}` | Get order detail |
+| PUT | `/api/admin/orders/{id}/status` | Update order status |
+
+> Full interactive docs at `/swagger-ui.html` — all endpoints are testable directly in the browser.
+
+---
+
+## Example: Place an Order
 
 ```bash
-# 1. Start PostgreSQL 16 (ensure it's running on port 5432)
-# Create a database named 'shop'
+# 1. Login
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"customer1","password":"customer123"}'
+# Response: { "token": "eyJ..." }
 
-# 2. Clone and run
-git clone <repo-url>
-cd seven-eleven-shop-backend
-
-# 3. Run with dev profile
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-
-# Or set env vars explicitly:
-DB_URL=jdbc:postgresql://localhost:5432/shop \
-DB_USERNAME=postgres \
-DB_PASSWORD=postgres \
-mvn spring-boot:run
+# 2. Place order
+curl -X POST http://localhost:8080/api/orders \
+  -H "Authorization: Bearer eyJ..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"productId": 1, "quantity": 2},
+      {"productId": 3, "quantity": 1}
+    ],
+    "note": "no ice"
+  }'
 ```
 
 ---
 
-## Default Credentials
+## Design Highlights
 
-| Role | Username | Password |
-|------|----------|----------|
-| Admin | `admin` | `admin123` |
-| Customer | `customer1` | `customer123` |
-| Customer | `customer2` | `user123` |
+### Oversell Prevention
+Product stock is locked with `PESSIMISTIC_WRITE` before each order, preventing race conditions under concurrent requests.
 
-> Users are seeded automatically on first startup via `DataInitializerConfig`.
+### Price Snapshot
+Unit price is captured from the database at order time — never trusted from the client. Ensures historical order accuracy even when product prices change later.
 
----
+### Kafka — Fire-and-Forget
+An `OrderCreatedEvent` is published to Kafka after each successful order. The publish is wrapped in a try-catch so a Kafka outage never rolls back the order transaction.
 
-## API Documentation
+### Redis Cache
+`GET /api/products/{id}` and `GET /api/categories` are cached. Cache is evicted on any product write (create / update / delete). TTL: products 10 min, categories 30 min.
 
-Swagger UI: **http://localhost:8080/swagger-ui.html**
+### Soft Delete
+Products are soft-deleted via a `deleted_at` timestamp. All public queries filter `WHERE deleted_at IS NULL`, preserving referential integrity on existing orders.
 
-### Endpoint Summary
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/api/auth/login` | Public | Login, returns JWT |
-| `POST` | `/api/auth/register` | Public | Register customer |
-| `GET` | `/api/categories` | Public | List all categories |
-| `GET` | `/api/products` | Public | List products (search, filter, page) |
-| `GET` | `/api/products/{id}` | Public | Product detail |
-| `POST` | `/api/admin/products` | ADMIN | Create product |
-| `PUT` | `/api/admin/products/{id}` | ADMIN | Update product |
-| `DELETE` | `/api/admin/products/{id}` | ADMIN | Soft-delete product |
-| `POST` | `/api/orders` | CUSTOMER | Place an order |
-| `GET` | `/api/orders/my` | CUSTOMER | My order history |
-| `GET` | `/api/admin/orders` | ADMIN | All orders (filter by status/date) |
-| `GET` | `/api/admin/orders/{id}` | ADMIN | Order detail |
-| `PUT` | `/api/admin/orders/{id}/status` | ADMIN | Update order status |
-
-**Auth header:** `Authorization: Bearer <token>`
-
-**Product search params:** `?page=0&size=10&search=trà&categoryId=1&sortBy=price&direction=asc`
-
-**Admin order filter params:** `?status=PENDING&from=2025-01-01T00:00:00&to=2025-12-31T23:59:59`
+### Security
+Stateless JWT authentication (no server-side session). Role-based access control: `CUSTOMER` vs `ADMIN`. Non-root Docker user.
 
 ---
 
 ## Running Tests
 
 ```bash
-# Run all unit tests
 mvn test
-
-# Run with verbose output
-mvn test -Dsurefire.useFile=false
-
-# Run a specific test class
-mvn test -Dtest=OrderServiceTest
 ```
 
-Unit tests use Mockito and do not require a running database.
+10 unit tests covering `OrderService` and `ProductService`: stock decrement, oversell guard, multi-item total calculation, cache eviction. Uses Mockito — no external dependencies required.
 
 ---
 
 ## Project Structure
 
 ```
-seven-eleven-shop-backend/
-├── src/main/java/vn/sevenleven/shop/
-│   ├── ShopApplication.java
-│   ├── config/
-│   │   ├── DataInitializerConfig.java   # seeds admin + customers on startup
-│   │   ├── JpaAuditingConfig.java
-│   │   ├── OpenApiConfig.java
-│   │   └── SecurityConfig.java
-│   ├── controller/
-│   │   ├── AuthController.java
-│   │   ├── ProductController.java       # public: GET /api/products
-│   │   ├── AdminProductController.java  # ADMIN: /api/admin/products
-│   │   ├── OrderController.java         # CUSTOMER: /api/orders
-│   │   ├── AdminOrderController.java    # ADMIN: /api/admin/orders
-│   │   └── CategoryController.java
-│   ├── service/
-│   │   ├── AuthService.java + impl/
-│   │   ├── ProductService.java + impl/
-│   │   ├── OrderService.java + impl/    # PESSIMISTIC_WRITE lock for stock
-│   │   └── CategoryService.java + impl/
-│   ├── repository/                      # Spring Data JPA
-│   ├── entity/                          # JPA entities (extend BaseEntity)
-│   ├── dto/request/                     # Java records with @Valid
-│   ├── dto/response/                    # Java records
-│   ├── mapper/                          # MapStruct
-│   ├── security/                        # JWT filter + UserDetailsService
-│   ├── exception/                       # GlobalExceptionHandler + custom exceptions
-│   └── enums/                           # Role, OrderStatus
-├── src/main/resources/
-│   ├── application.yml
-│   ├── application-dev.yml
-│   ├── application-docker.yml
-│   └── db/migration/
-│       ├── V1__init.sql                 # Schema DDL
-│       └── V2__seed_data.sql            # Categories + products
-├── src/test/java/vn/sevenleven/shop/
-│   └── service/
-│       ├── OrderServiceTest.java        # 5 test cases with Mockito
-│       └── ProductServiceTest.java      # 4 test cases with Mockito
-├── Dockerfile                           # Multi-stage build
-├── docker-compose.yml
-├── pom.xml
-├── .env.example
-├── .gitignore
-└── .github/workflows/ci.yml
+src/
+├── main/java/vn/sevenleven/shop/
+│   ├── config/       # Security, Redis, Kafka, JPA auditing, OpenAPI
+│   ├── controller/   # REST controllers (public + admin)
+│   ├── dto/          # Request/Response records (no entity exposure)
+│   ├── entity/       # JPA entities with BaseEntity auditing
+│   ├── enums/        # Role, OrderStatus
+│   ├── event/        # Kafka event records
+│   ├── exception/    # GlobalExceptionHandler, custom exceptions
+│   ├── kafka/        # OrderEventProducer, OrderEventConsumer
+│   ├── mapper/       # MapStruct mappers
+│   ├── repository/   # Spring Data JPA repositories
+│   └── service/      # Service interfaces + implementations
+├── main/resources/
+│   ├── application.yml         # Base config
+│   ├── application-dev.yml     # Local dev overrides
+│   ├── application-docker.yml  # Docker network hostnames
+│   └── db/migration/           # Flyway SQL migrations (V1 DDL, V2 seed)
+└── test/java/vn/sevenleven/shop/
+    └── service/                # Unit tests (Mockito)
 ```
 
 ---
 
-## Contact
+## CI/CD
 
-**Huỳnh Việt Đan** — vdan2242004@gmail.com
+GitHub Actions runs on every push to `main` / `develop`:
+
+1. **Build & Test** — `mvn test` (JDK 17 Temurin, Maven cache)
+2. **Build Docker Image** — validates the multi-stage Dockerfile builds successfully
