@@ -16,9 +16,11 @@ import vn.sevenleven.shop.entity.OrderItem;
 import vn.sevenleven.shop.entity.Product;
 import vn.sevenleven.shop.entity.User;
 import vn.sevenleven.shop.enums.OrderStatus;
+import vn.sevenleven.shop.event.OrderCreatedEvent;
 import vn.sevenleven.shop.exception.BusinessException;
 import vn.sevenleven.shop.exception.InsufficientStockException;
 import vn.sevenleven.shop.exception.ResourceNotFoundException;
+import vn.sevenleven.shop.kafka.OrderEventProducer;
 import vn.sevenleven.shop.mapper.OrderMapper;
 import vn.sevenleven.shop.repository.OrderRepository;
 import vn.sevenleven.shop.repository.ProductRepository;
@@ -39,6 +41,7 @@ public class OrderServiceImpl implements OrderService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final OrderMapper orderMapper;
+    private final OrderEventProducer orderEventProducer;
 
     @Override
     @Transactional
@@ -93,6 +96,11 @@ public class OrderServiceImpl implements OrderService {
         Order saved = orderRepository.save(order); // cascades to order_items
         log.info("Order created: id={}, user={}, items={}, total={}",
                 saved.getId(), username, orderItems.size(), totalAmount);
+
+        // Publish event after DB commit — fire-and-forget, Kafka failure does not roll back the order
+        orderEventProducer.publishOrderCreated(new OrderCreatedEvent(
+                saved.getId(), user.getId(), username,
+                totalAmount, orderItems.size(), saved.getCreatedAt()));
 
         return orderMapper.toResponse(saved);
     }

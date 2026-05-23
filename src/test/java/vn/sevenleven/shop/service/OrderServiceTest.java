@@ -18,6 +18,7 @@ import vn.sevenleven.shop.enums.Role;
 import vn.sevenleven.shop.exception.BusinessException;
 import vn.sevenleven.shop.exception.InsufficientStockException;
 import vn.sevenleven.shop.exception.ResourceNotFoundException;
+import vn.sevenleven.shop.kafka.OrderEventProducer;
 import vn.sevenleven.shop.mapper.OrderMapper;
 import vn.sevenleven.shop.repository.OrderRepository;
 import vn.sevenleven.shop.repository.ProductRepository;
@@ -44,6 +45,7 @@ class OrderServiceTest {
     @Mock private ProductRepository productRepository;
     @Mock private UserRepository userRepository;
     @Mock private OrderMapper orderMapper;
+    @Mock private OrderEventProducer orderEventProducer;
 
     @InjectMocks
     private OrderServiceImpl orderService;
