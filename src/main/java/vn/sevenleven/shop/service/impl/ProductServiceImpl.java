@@ -2,6 +2,8 @@ package vn.sevenleven.shop.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -53,6 +55,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @Cacheable(value = "products", key = "'id:' + #id")
     @Transactional(readOnly = true)
     public ProductResponse getProduct(Long id) {
         Product product = productRepository.findActiveById(id)
@@ -61,6 +64,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = "products", allEntries = true)
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request) {
         Product product = productMapper.toEntity(request);
@@ -78,6 +82,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = "products", allEntries = true)
     @Transactional
     public ProductResponse updateProduct(Long id, UpdateProductRequest request) {
         Product product = productRepository.findActiveById(id)
@@ -100,6 +105,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = "products", allEntries = true)
     @Transactional
     public void deleteProduct(Long id) {
         Product product = productRepository.findActiveById(id)

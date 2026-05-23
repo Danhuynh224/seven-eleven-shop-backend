@@ -45,6 +45,22 @@ services:
       retries: 5
       start_period: 30s
 
+  redis:
+    image: redis:7-alpine
+    container_name: seven_eleven_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - shop_network
+
   backend:
     build:
       context: .
@@ -60,10 +76,14 @@ services:
       JWT_SECRET:            ${JWT_SECRET:-dev-secret-key-change-in-prod-must-be-at-least-32-chars!!}
       JWT_EXPIRATION_MS:     ${JWT_EXPIRATION_MS:-86400000}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST:            redis
+      REDIS_PORT:            6379
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - shop_network
@@ -73,6 +93,8 @@ volumes:
   postgres_data:
     driver: local
   kafka_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:
