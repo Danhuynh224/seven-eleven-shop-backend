@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.sevenleven.shop.dto.request.CreateOrderRequest;
@@ -27,10 +29,13 @@ import vn.sevenleven.shop.repository.ProductRepository;
 import vn.sevenleven.shop.repository.UserRepository;
 import vn.sevenleven.shop.service.OrderService;
 
+import jakarta.persistence.criteria.Predicate;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -55,28 +60,31 @@ public class OrderServiceImpl implements OrderService {
 
         List<OrderItem> orderItems = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
+        Map<Long, Integer> quantityByProductId = mergeQuantitiesByProductId(request.items());
 
-        for (OrderItemRequest itemReq : request.items()) {
+        for (Map.Entry<Long, Integer> itemReq : quantityByProductId.entrySet()) {
+            Long productId = itemReq.getKey();
+            Integer quantity = itemReq.getValue();
             // Pessimistic lock prevents concurrent threads from overselling the same product
-            Product product = productRepository.findByIdWithLock(itemReq.productId())
+            Product product = productRepository.findByIdWithLock(productId)
                     .orElseThrow(() -> new ResourceNotFoundException(
-                            "Product not found with id: " + itemReq.productId()));
+                            "Product not found with id: " + productId));
 
-            if (product.getStock() < itemReq.quantity()) {
+            if (product.getStock() < quantity) {
                 throw new InsufficientStockException(
                         String.format("Insufficient stock for '%s'. Available: %d, requested: %d",
-                                product.getName(), product.getStock(), itemReq.quantity()));
+                                product.getName(), product.getStock(), quantity));
             }
 
-            product.setStock(product.getStock() - itemReq.quantity());
+            product.setStock(product.getStock() - quantity);
 
             // Snapshot price from DB — never trust client-supplied price
             BigDecimal unitPrice = product.getPrice();
-            totalAmount = totalAmount.add(unitPrice.multiply(BigDecimal.valueOf(itemReq.quantity())));
+            totalAmount = totalAmount.add(unitPrice.multiply(BigDecimal.valueOf(quantity)));
 
             orderItems.add(OrderItem.builder()
                     .product(product)
-                    .quantity(itemReq.quantity())
+                    .quantity(quantity)
                     .unitPrice(unitPrice)
                     .build());
         }
@@ -105,6 +113,14 @@ public class OrderServiceImpl implements OrderService {
         return orderMapper.toResponse(saved);
     }
 
+    private Map<Long, Integer> mergeQuantitiesByProductId(List<OrderItemRequest> items) {
+        Map<Long, Integer> quantityByProductId = new LinkedHashMap<>();
+        for (OrderItemRequest item : items) {
+            quantityByProductId.merge(item.productId(), item.quantity(), Integer::sum);
+        }
+        return quantityByProductId;
+    }
+
     @Override
     @Transactional(readOnly = true)
     public Page<OrderResponse> getMyOrders(String username, int page, int size) {
@@ -119,8 +135,10 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(readOnly = true)
     public Page<OrderResponse> getAllOrders(OrderStatus status, LocalDateTime from,
                                             LocalDateTime to, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return orderRepository.findAllWithFilters(status, from, to, pageable)
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Specification<Order> spec = buildOrderFilters(status, from, to);
+
+        return orderRepository.findAll(spec, pageable)
                 .map(orderMapper::toResponse);
     }
 
@@ -142,5 +160,26 @@ public class OrderServiceImpl implements OrderService {
         Order saved = orderRepository.save(order);
         log.info("Order status updated: id={}, status={}", id, request.status());
         return orderMapper.toResponse(saved);
+    }
+
+    private Specification<Order> buildOrderFilters(OrderStatus status, LocalDateTime from,
+                                                   LocalDateTime to) {
+        return (root, query, criteriaBuilder) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            if (status != null) {
+                predicates.add(criteriaBuilder.equal(root.get("status"), status));
+            }
+            if (from != null) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), from));
+            }
+            if (to != null) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), to));
+            }
+
+            return predicates.isEmpty()
+                    ? criteriaBuilder.conjunction()
+                    : criteriaBuilder.and(predicates.toArray(new Predicate[0]));
+        };
     }
 }

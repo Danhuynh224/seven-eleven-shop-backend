@@ -34,6 +34,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -199,5 +200,47 @@ class OrderServiceTest {
         assertThat(result.totalAmount()).isEqualByComparingTo("190000");
         assertThat(testProduct.getStock()).isEqualTo(8);  // 10 - 2
         assertThat(product2.getStock()).isEqualTo(2);     // 5 - 3
+    }
+
+    @Test
+    @DisplayName("createOrder: duplicate product IDs are merged into one order item")
+    void createOrder_withDuplicateProductIds_shouldMergeQuantities() {
+        // Given
+        CreateOrderRequest request = new CreateOrderRequest(List.of(
+                new OrderItemRequest(1L, 1),
+                new OrderItemRequest(1L, 2),
+                new OrderItemRequest(1L, 3)
+        ), null);
+
+        Order savedOrder = Order.builder()
+                .id(1L)
+                .user(testUser)
+                .totalAmount(new BigDecimal("300000"))
+                .status(OrderStatus.PENDING)
+                .items(new ArrayList<>())
+                .build();
+
+        OrderResponse expectedResponse = new OrderResponse(
+                1L, 1L, "customer1", new BigDecimal("300000"),
+                "PENDING", null, List.of(),
+                LocalDateTime.now(), LocalDateTime.now());
+
+        when(userRepository.findByUsername("customer1")).thenReturn(Optional.of(testUser));
+        when(productRepository.findByIdWithLock(1L)).thenReturn(Optional.of(testProduct));
+        when(orderRepository.save(any(Order.class))).thenReturn(savedOrder);
+        when(orderMapper.toResponse(any(Order.class))).thenReturn(expectedResponse);
+
+        // When
+        OrderResponse result = orderService.createOrder(request, "customer1");
+
+        // Then
+        assertThat(result.totalAmount()).isEqualByComparingTo("300000");
+        assertThat(testProduct.getStock()).isEqualTo(4); // 10 - (1 + 2 + 3)
+        verify(productRepository).findByIdWithLock(1L);
+        verify(orderRepository).save(argThat(order ->
+                order.getItems().size() == 1
+                        && order.getItems().get(0).getProduct().getId().equals(1L)
+                        && order.getItems().get(0).getQuantity() == 6
+        ));
     }
 }
