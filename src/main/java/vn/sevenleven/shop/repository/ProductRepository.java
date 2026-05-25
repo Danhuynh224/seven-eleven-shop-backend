@@ -16,10 +16,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     @EntityGraph(attributePaths = {"category"})
     @Query(value = "SELECT p FROM Product p WHERE p.deletedAt IS NULL " +
-                   "AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+                   "AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', CAST(:search AS String), '%'))) " +
                    "AND (:categoryId IS NULL OR p.category.id = :categoryId)",
            countQuery = "SELECT COUNT(p) FROM Product p WHERE p.deletedAt IS NULL " +
-                        "AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+                        "AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', CAST(:search AS String), '%'))) " +
                         "AND (:categoryId IS NULL OR p.category.id = :categoryId)")
     Page<Product> findActiveProducts(
             @Param("search") String search,
