@@ -29,6 +29,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("SELECT p FROM Product p WHERE p.id = :id AND p.deletedAt IS NULL")
     Optional<Product> findActiveById(@Param("id") Long id);
 
+    boolean existsByCategory_IdAndDeletedAtIsNull(Long categoryId);
+
     // Acquires a pessimistic write lock to prevent concurrent overselling
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Product p WHERE p.id = :id AND p.deletedAt IS NULL")
