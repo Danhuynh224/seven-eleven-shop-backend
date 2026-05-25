@@ -14,13 +14,13 @@ Covers product management, customer ordering, and real-time event streaming.
 | Security | Spring Security 6 + JWT (jjwt 0.12) |
 | Database | PostgreSQL 16 + Flyway migrations |
 | Cache | Redis 7 (`@Cacheable` / `@CacheEvict`) |
-| Messaging | Apache Kafka 3.7 (KRaft — no Zookeeper) |
+| Messaging | Apache Kafka 3.8 (KRaft — no Zookeeper) |
 | ORM | Spring Data JPA + Hibernate |
 | Docs | SpringDoc OpenAPI 2.5 / Swagger UI |
 | Mapping | MapStruct 1.5.5 + Lombok |
 | Build | Maven 3.9, multi-stage Docker |
 | CI | GitHub Actions |
-| Testing | JUnit 5 + Mockito (10 unit tests) |
+| Testing | JUnit 5 + Mockito (29 unit tests) |
 
 ---
 
@@ -39,8 +39,10 @@ Covers product management, customer ordering, and real-time event streaming.
                         ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  REST Controllers                         │
-│  /api/auth  /api/products  /api/orders                   │
-│  /api/admin/products  /api/admin/orders  /api/categories │
+│  /api/auth     /api/products      /api/orders            │
+│  /api/categories                                         │
+│  /api/admin/products  /api/admin/orders                  │
+│  /api/admin/categories                                   │
 └───────────────────────┬─────────────────────────────────┘
                         │
                         ▼
@@ -135,11 +137,19 @@ Services started:
 | PUT | `/api/admin/products/{id}` | Update product |
 | DELETE | `/api/admin/products/{id}` | Soft-delete product |
 
-### Categories
+### Categories (Public)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/categories` | List all categories |
+
+### Admin — Categories
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/admin/categories` | Create a new category |
+| PUT | `/api/admin/categories/{id}` | Rename a category |
+| DELETE | `/api/admin/categories/{id}` | Delete category (blocked if active products exist) |
 
 ### Orders (Customer)
 
@@ -196,7 +206,10 @@ Unit price is captured from the database at order time — never trusted from th
 An `OrderCreatedEvent` is published to Kafka after each successful order. The publish is wrapped in a try-catch so a Kafka outage never rolls back the order transaction.
 
 ### Redis Cache
-`GET /api/products/{id}` and `GET /api/categories` are cached. Cache is evicted on any product write (create / update / delete). TTL: products 10 min, categories 30 min.
+`GET /api/products/{id}` and `GET /api/categories` are cached. Cache is evicted on any product write (create / update / delete) and on any category write. TTL: products 10 min, categories 30 min.
+
+### Category Integrity
+Deleting a category is blocked if any active (non-deleted) product still references it, returning `400 Bad Request`. This prevents orphaned products and avoids database FK violations.
 
 ### Soft Delete
 Products are soft-deleted via a `deleted_at` timestamp. All public queries filter `WHERE deleted_at IS NULL`, preserving referential integrity on existing orders.
@@ -212,7 +225,14 @@ Stateless JWT authentication (no server-side session). Role-based access control
 mvn test
 ```
 
-10 unit tests covering `OrderService` and `ProductService`: stock decrement, oversell guard, multi-item total calculation, cache eviction. Uses Mockito — no external dependencies required.
+29 unit tests across 4 service classes. Uses Mockito — no external dependencies required.
+
+| Test class | Cases | What's covered |
+|---|---|---|
+| `OrderServiceTest` | 5 | Stock decrement, oversell guard, multi-item total, empty items validation |
+| `ProductServiceTest` | 5 | CRUD, soft-delete, paginated search |
+| `AuthServiceTest` | 8 | Login success/failure, credential forwarding, password encoding, CUSTOMER role assignment |
+| `CategoryServiceTest` | 11 | Full CRUD, duplicate-name guard, same-name short-circuit on update, active-product block on delete |
 
 ---
 
